@@ -145,7 +145,7 @@ function draw() {
         const y = cell.row * FONT_SIZE + FONT_SIZE / 2;
         
         // 动画：缓慢变大直到3倍
-        if (cell.scale < 2.3) {
+        if (cell.scale < 2) {
             cell.scale += 0.05;
             
             // 【修改点】：通过计数器控制数字变化频率，每3帧变化一次
