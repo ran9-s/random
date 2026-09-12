@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smooth Letter Flow</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<canvas id="matrixCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('matrixCanvas');
+const ctx = canvas.getContext('2d');
+
+// 核心配置参数
+const FONT_SIZE = 36; 
+const FONT_FAMILY = "'Courier New', Courier, monospace"; 
+const LETTER_COLOR = "#00aaff"; 
+const BG_FADE_ALPHA = 0.16;
+const BASE_SPEED = 0.2; 
+const SPEED_VARIATION = 0.0001; 
+
+// 连续字母长度的配置
+const MIN_LENGTH = 5;  
+const MAX_LENGTH = 15; 
+
+let cols, rows;
+let drops = []; 
+
+// 存储被点击的单元格状态
+let activeCells = {}; 
+
+// 存储扩散的纯黑波纹
+let waves = []; 
+
+// 初始化/重置画布
+function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    cols = Math.floor(canvas.width / FONT_SIZE);
+    rows = Math.floor(canvas.height / FONT_SIZE) + 2; 
+    
+    drops = [];
+    for (let i = 0; i < cols; i++) {
+        drops.push(createDrop(Math.random() * rows));
+    }
+    
+    ctx.font = `${FONT_SIZE}px ${FONT_FAMILY}`;
+    ctx.textAlign = 'center'; 
+    ctx.textBaseline = 'middle'; 
+}
+
+// 生成一列的状态
+function createDrop(startY) {
+    const length = Math.floor(Math.random() * (MAX_LENGTH - MIN_LENGTH + 1)) + MIN_LENGTH;
+    const letters = [];
+    for (let j = 0; j < length; j++) {
+        // 1/5 的概率生成带旋转状态的字母
+        const isRotated = Math.random() < 0.2;
+        letters.push({
+            char: getRandomLetter(),
+            rotation: 0, 
+            rotationSpeed: isRotated ? (0.02 + Math.random() * 0.03) : 0, 
+            isRotated: isRotated
+        });
+    }
+    
+    return {
+        y: startY,
+        speed: BASE_SPEED + (Math.random() * SPEED_VARIATION),
+        length: length,
+        letters: letters
+    };
+}
+
+// 随机生成英文字母 (A-Z)
+function getRandomLetter() {
+    const charCode = Math.floor(Math.random() * 26) + 65;
+    return String.fromCharCode(charCode);
+}
+
+// 核心动画循环
+function draw() {
+    // 1. 绘制半透明黑色背景，实现拖尾效果
+    ctx.fillStyle = `rgba(0, 0, 0, ${BG_FADE_ALPHA})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // 2. 绘制并更新背景字母雨
+    ctx.fillStyle = LETTER_COLOR;
+    for (let i = 0; i < cols; i++) {
+        const drop = drops[i];
+        const x = i * FONT_SIZE + FONT_SIZE / 2; 
+        
+        for (let j = drop.length - 1; j >= 0; j--) {
+            const currentY = (drop.y - j) * FONT_SIZE;
+            if (currentY > -FONT_SIZE && currentY < canvas.height + FONT_SIZE) {
+                const letterData = drop.letters[j];
+                
+                if (letterData.isRotated) {
+                    letterData.rotation += letterData.rotationSpeed;
+                    ctx.save();
+                    ctx.translate(x, currentY);
+                    ctx.rotate(letterData.rotation);
+                    ctx.fillText(letterData.char, 0, 0);
+                    ctx.restore();
+                } else {
+                    ctx.fillText(letterData.char, x, currentY);
+                }
+            }
+        }
+        
+        drop.y += drop.speed;
+        
+        if ((drop.y - drop.length) * FONT_SIZE > canvas.height) {
+            drops[i] = createDrop(-Math.random() * 5);
+        }
+    }
+    
+    // 3. 绘制纯黑扩散波纹（在背景字母上方，点击字母下方）
+    for (let i = waves.length - 1; i >= 0; i--) {
+        const wave = waves[i];
+        
+        // 如果尚未铺满屏幕，则继续扩散
+        if (wave.radius < wave.maxRadius) {
+            wave.radius += 10; // 扩散速度
+        }
+        
+        // 绘制纯黑圆形，完全覆盖下方的字母雨拖尾
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(wave.x, wave.y, wave.radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    // 4. 绘制上层被激活的单元格（在最上层，不被纯黑波纹覆盖）
+    for (let key in activeCells) {
+        const cell = activeCells[key];
+        const x = cell.col * FONT_SIZE + FONT_SIZE / 2;
+        const y = cell.row * FONT_SIZE + FONT_SIZE / 2;
+        
+        // 动画：缓慢变大直到3倍
+        if (cell.scale < 3) {
+            cell.scale += 0.05;
+            
+            // 【修改点】：通过计数器控制数字变化频率，每3帧变化一次
+            cell.tickCounter = (cell.tickCounter || 0) + 1;
+            if (cell.tickCounter >= 3) {
+                cell.currentDigit = (cell.currentDigit + 1) % 10;
+                cell.letter = String(cell.currentDigit);
+                cell.tickCounter = 0; // 重置计数器
+            }
+        }
+        if (cell.scale > 3) cell.scale = 3;
+        
+        // 动画：颜色从蓝色过渡到粉色
+        if (cell.colorProgress < 1) {
+            cell.colorProgress += 0.02;
+            if (cell.colorProgress > 1) cell.colorProgress = 1;
+        }
+        
+        // 计算当前颜色
+        const r = Math.floor(0 + (255 - 0) * cell.colorProgress);
+        const g = Math.floor(170 + (105 - 170) * cell.colorProgress);
+        const b = Math.floor(255 + (180 - 255) * cell.colorProgress);
+        const currentColor = `rgb(${r}, ${g}, ${b})`;
+        
+        // 绘制上层字母（带缩放）
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(cell.scale, cell.scale);
+        ctx.fillStyle = currentColor;
+        ctx.fillText(cell.letter, 0, 0);
+        ctx.restore();
+    }
+    
+    requestAnimationFrame(draw);
+}
+
+// 监听鼠标点击事件（单击：切换数字状态）
+canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // 计算点击位置对应的网格行列
+    const col = Math.floor(mouseX / FONT_SIZE);
+    const row = Math.floor(mouseY / FONT_SIZE);
+    
+    const key = `${col}_${row}`;
+    
+    // 切换状态：如果已存在则删除，否则生成新数字
+    if (activeCells[key]) {
+        delete activeCells[key];
+    } else {
+        // 随机生成一个初始数字
+        const initialDigit = Math.floor(Math.random() * 10);
+        
+        activeCells[key] = {
+            col: col,
+            row: row,
+            letter: String(initialDigit),
+            currentDigit: initialDigit, // 记录当前数字，用于递增
+            scale: 1,
+            colorProgress: 0,
+            tickCounter: 0 // 初始化计数器
+        };
+        
+        // 触发纯黑波纹扩散
+        const centerX = col * FONT_SIZE + FONT_SIZE / 2;
+        const centerY = row * FONT_SIZE + FONT_SIZE / 2;
+        const maxRadius = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height);
+        
+        waves.push({
+            x: centerX,
+            y: centerY,
+            radius: 0,
+            maxRadius: maxRadius
+        });
+    }
+});
+
+// 监听鼠标右键事件（右键：清除所有上层字母和波纹）
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault(); 
+    activeCells = {};
+    waves = []; 
+});
+
+// 监听窗口大小变化，自适应重新计算
+window.addEventListener('resize', init);
+
+// 启动程序
+init();
+draw();
+</script>
+</body>
+</html>
